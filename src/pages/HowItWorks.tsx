@@ -76,6 +76,22 @@ export default function HowItWorks() {
   // Hook for live ShabdaVedh stream
   const { connected, a, b, fix: liveFix, confA, confB } = useShabdaVedh();
   const [lastCmdStatus, setLastCmdStatus] = useState<string | null>(null);
+
+  // Switch to live by itself the first time the bridge is reachable (unless the user picked a mode).
+  const modeTouched = useRef(false);
+  useEffect(() => { if (connected && !modeTouched.current) setMode("live"); }, [connected]);
+
+  // Live coordinates log: one row per new fix, newest first, at most 8 rows.
+  const [fixLog, setFixLog] = useState<{ t: string; x: number; y: number; z: number; r: number }[]>([]);
+  const lastLogged = useRef(0);
+  useEffect(() => {
+    if (!liveFix) return;
+    const now = Date.now();
+    if (now - lastLogged.current < 500) return;            // two rows a second is readable
+    lastLogged.current = now;
+    const t = new Date().toLocaleTimeString([], { hour12: false });
+    setFixLog((l) => [{ t, x: liveFix.x, y: liveFix.y, z: liveFix.z, r: liveFix.range }, ...l].slice(0, 8));
+  }, [liveFix]);
   const handleCmd = async (cmd: string) => {
     setLastCmdStatus(`Sending "${cmd}"...`);
     const ok = await sendCmd(cmd);
@@ -195,7 +211,7 @@ export default function HowItWorks() {
             <aside className="border border-[#22408f]/40 bg-[#050b1f]/75 p-5 backdrop-blur-sm">
               <div className="flex gap-1">
                 {(["simulation", "live"] as Mode[]).map((m) => (
-                  <button key={m} onClick={() => setMode(m)}
+                  <button key={m} onClick={() => { modeTouched.current = true; setMode(m); }}
                     className={`flex-1 border px-3 py-2 font-mono text-xs uppercase ${mode === m ? "border-[#2dd4e6] bg-[#2dd4e6] text-black" : "border-[#22408f]/40 text-[#8b99ab] hover:text-white"}`}>
                     {m}
                   </button>
@@ -239,6 +255,40 @@ export default function HowItWorks() {
                 <div className="mt-3 grid grid-cols-2 gap-2 font-mono text-xs text-[#8b99ab]">
                   <span>Ground range<br /><b className="text-[#c3cedb]">{sim ? `${f(simFix?.groundRangeM, 0)} m` : fmt(liveFix?.ground, 2, " m")}</b></span>
                   <span>Altitude<br /><b className="text-[#c3cedb]">{sim ? `${f(simFix?.altitudeM, 0)} m` : fmt(liveFix?.z, 2, " m")}</b></span>
+                </div>
+                <div className="mt-4 border-t border-[#22408f]/30 pt-3">
+                  <p className="mb-2 flex items-center justify-between font-mono text-[11px] text-[#2dd4e6]">
+                    <span>DRONE COORDINATES {sim ? "(SIM)" : "(LIVE)"}</span>
+                    {!sim && <span className={liveFix ? "text-emerald-400" : "text-amber-300"}>{liveFix ? "● tracking" : "○ no fix"}</span>}
+                  </p>
+                  <div className="grid grid-cols-3 gap-2 text-center font-mono">
+                    {([
+                      ["X", sim ? simFix?.x : liveFix?.x, "out from posts"],
+                      ["Y", sim ? simFix?.y : liveFix?.y, "toward post B"],
+                      ["Z", sim ? simFix?.z : liveFix?.z, "height"],
+                    ] as [string, number | undefined, string][]).map(([k, v, hint]) => (
+                      <div key={k} className="border border-[#22408f]/40 bg-black/40 px-1 py-2">
+                        <div className="text-[10px] text-[#8b99ab]">{k}</div>
+                        <div className="text-lg text-white">{sim ? `${f(v, 0)}` : fmt(v, 2)}<span className="ml-0.5 text-[10px] text-[#8b99ab]">m</span></div>
+                        <div className="text-[9px] text-[#5d6b7d]">{sim ? "" : hint}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {!sim && (
+                    <p className="mt-1 font-mono text-[9px] text-[#5d6b7d]">Origin: post A centre mic. Post B is at Y = {BASELINE_M.toFixed(2)} m.</p>
+                  )}
+                  {!sim && fixLog.length > 0 && (
+                    <table className="mt-2 w-full font-mono text-[10px] text-[#8b99ab]">
+                      <thead><tr className="text-left text-[#5d6b7d]"><th>time</th><th>x</th><th>y</th><th>z</th><th>range</th></tr></thead>
+                      <tbody>
+                        {fixLog.map((r, i) => (
+                          <tr key={r.t + i} className={i === 0 ? "text-white" : ""}>
+                            <td>{r.t}</td><td>{r.x.toFixed(2)}</td><td>{r.y.toFixed(2)}</td><td>{r.z.toFixed(2)}</td><td>{r.r.toFixed(2)} m</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
                 {!sim && (
                   <div className="mt-2 font-mono text-[11px] text-[#8b99ab]">
