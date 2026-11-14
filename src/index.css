@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html { background: #030509; }
+body { margin: 0; background: #030509; color: #e6edf5; overflow-x: clip; -webkit-font-smoothing: antialiased; }
+h1, h2, h3 { font-family: "Chakra Petch", sans-serif; }
+html.lenis, html.lenis body { height: auto; }
+.lenis.lenis-smooth { scroll-behavior: auto !important; }
