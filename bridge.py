@@ -19,6 +19,8 @@ HTTP_PORT = 8000     # your frontend talks to this
 BASELINE_M = 0.80    # post B is this far from post A (same value as receive.py)
 CONF_KEY = "p"       # packet field that holds the confidence score (0..1 or 0..100)
 CONF_MIN = 0.75      # a post below this is ignored: no fix, and the page shows "nil"
+SHOW_ALL = True      # True: show EVERY bearing the posts send (no lock / 75 % filter) to see the raw behaviour.
+                     # False: only locked drone bearings with conf >= CONF_MIN (clean demo mode).
 
 latest = {}          # "A" / "B" -> newest packet
 clients = set()      # one queue per connected browser tab
@@ -109,9 +111,17 @@ def udp_loop():
                 # laz/lel = last VALID bearing (clutter never moves it).
                 c = float(pkt.get("conf", 0)) / 100
                 pkt["st"] = pkt.get("label", pkt.get("st"))
-                pkt["az"], pkt["el"] = pkt["laz"], pkt["lel"]
                 pkt["conf"] = c
-                pkt["good"] = bool(pkt["valid"]) and c >= CONF_MIN
+                if SHOW_ALL:
+                    # newest bearing of any sound: tracked one if the post has it, else the raw one
+                    if pkt.get("ok"):
+                        pass                                   # az/el already hold it
+                    elif pkt.get("raw_ok"):
+                        pkt["az"], pkt["el"] = pkt.get("raw_az"), pkt.get("raw_el")
+                    pkt["good"] = bool(pkt.get("ok") or pkt.get("raw_ok"))
+                else:
+                    pkt["az"], pkt["el"] = pkt["laz"], pkt["lel"]
+                    pkt["good"] = bool(pkt["valid"]) and c >= CONF_MIN
             else:                                              # sim.py packets
                 c = conf_of(pkt)
                 pkt["conf"] = c                                # normalised 0..1
@@ -125,6 +135,20 @@ def udp_loop():
                 if r and r[4] <= 0.4 + 0.15 * r[0]:           # posts must agree on the same target
                     fix = {"range": r[0], "x": r[1], "y": r[2], "z": r[3], "miss": r[4]}
             broadcast({"type": "update", "post": post, "packet": pkt, "fix": fix})
+
+
+def heard_loop():
+    """Every 2 s print one line per post, so you can see in the terminal that data is arriving."""
+    while True:
+        time.sleep(2)
+        now = time.time()
+        for k in ("A", "B"):
+            x = latest.get(k)
+            if not x or now - x["_rx"] > 2:
+                print(f"post {k}: nothing heard (posts on the same Wi-Fi as this laptop? firewall?)", flush=True)
+            else:
+                print(f"post {k}: {x.get('st')} drone {float(x.get('p') or 0):.0%} conf {x['conf'] or 0:.0%} "
+                      f"az {x.get('az')} el {x.get('el')} drop {x.get('drop')} cpu {x.get('cpu')}", flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -186,4 +210,6 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     threading.Thread(target=udp_loop, daemon=True).start()
     print(f"UDP {UDP_PORT} -> http://localhost:{HTTP_PORT}/events   (Ctrl+C to stop)", flush=True)
+    print("mode: " + ("SHOW_ALL (every bearing, no 75% filter)" if SHOW_ALL else f"locked only, conf >= {CONF_MIN:.0%}"), flush=True)
+    threading.Thread(target=heard_loop, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", HTTP_PORT), Handler).serve_forever()
