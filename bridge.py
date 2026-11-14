@@ -86,13 +86,15 @@ def send_cmd(text):
 
 def udp_loop():
     while True:
-        data, addr = sock.recvfrom(2048)
+        data, addr = sock.recvfrom(8192)
         for raw in data.decode(errors="ignore").splitlines():
             try:
                 pkt = json.loads(raw)
             except ValueError:
                 continue
             post = pkt.get("post", "?")
+            if post not in ("A", "B") and "err" not in pkt and "msg" not in pkt:
+                continue
             if "err" in pkt:                                   # mic wiring problem
                 broadcast({"type": "error", **pkt})
                 continue
@@ -102,16 +104,25 @@ def udp_loop():
             now = time.time()
             pkt["_rx"] = now
             pkt["_ip"] = addr[0]
-            c = conf_of(pkt)
-            pkt["conf"] = c                                    # normalised 0..1
-            pkt["good"] = bool(pkt.get("ok")) and c is not None and c >= CONF_MIN
+            if "valid" in pkt and "laz" in pkt:
+                # Real posts (firmware v1.8+): conf is 0-100, valid = locked + conf >= 75 + held 0.3 s.
+                # laz/lel = last VALID bearing (clutter never moves it).
+                c = float(pkt.get("conf", 0)) / 100
+                pkt["st"] = pkt.get("label", pkt.get("st"))
+                pkt["az"], pkt["el"] = pkt["laz"], pkt["lel"]
+                pkt["conf"] = c
+                pkt["good"] = bool(pkt["valid"]) and c >= CONF_MIN
+            else:                                              # sim.py packets
+                c = conf_of(pkt)
+                pkt["conf"] = c                                # normalised 0..1
+                pkt["good"] = bool(pkt.get("ok")) and c is not None and c >= CONF_MIN
             latest[post] = pkt
             fix = None
             A, B = latest.get("A"), latest.get("B")
             if (A and B and now - A["_rx"] < 0.5 and now - B["_rx"] < 0.5
                     and A["good"] and B["good"]):
                 r = triangulate(A["az"], A["el"], B["az"], B["el"])
-                if r:
+                if r and r[4] <= 0.4 + 0.15 * r[0]:           # posts must agree on the same target
                     fix = {"range": r[0], "x": r[1], "y": r[2], "z": r[3], "miss": r[4]}
             broadcast({"type": "update", "post": post, "packet": pkt, "fix": fix})
 

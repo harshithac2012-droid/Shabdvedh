@@ -94,8 +94,9 @@ export default function HowItWorks() {
   const liveDroneFix: DroneFix | null = useMemo(() => {
     if (!liveFix) return null;
     return {
-      thetaDeg: a?.az !== undefined ? ((a.az % 360) + 360) % 360 : 0,
-      elevationDeg: a?.el ?? 0,
+      // Posts face North, post B is to the West: "+az toward B" is anticlockwise, so compass = -az.
+      thetaDeg: ((-Math.atan2(liveFix.y, liveFix.x) * 180 / Math.PI) % 360 + 360) % 360,
+      elevationDeg: Math.atan2(liveFix.z, liveFix.ground) * 180 / Math.PI,
       distanceM: liveFix.range,
       groundRangeM: liveFix.ground,
       altitudeM: liveFix.z,
